@@ -26,4 +26,4 @@ Follow these steps to get the chatbot up and running on your local machine.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-username/legal-chatbot.git
+   git clone https://github.com/keshav1441/legal-chatbot.git
