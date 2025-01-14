@@ -3,15 +3,25 @@ from prompt_utils import usecase_prompt
 import os
 from dotenv import load_dotenv
 from groq import Groq # type: ignore
+import certifi
+import httpx
+import io
+import PyPDF2
+import docx
 
-# Load environment variables from the .env file
 load_dotenv()
 
 # Function to initialize the Groq client
 def setup_groq_client(api_key):
-    return Groq(api_key=api_key)
+    # Configure SSL certificate
+    os.environ['SSL_CERT_FILE'] = certifi.where()
+    
+    # Create httpx client with SSL verification
+    http_client = httpx.Client(verify=certifi.where())
+    
+    # Initialize Groq client with custom HTTP client
+    return Groq(api_key=api_key, http_client=http_client)
 
-# Function to fetch AI response from Groq
 def fetch_ai_response(client, conversation_history):
     try:
         response = client.chat.completions.create(
@@ -23,7 +33,6 @@ def fetch_ai_response(client, conversation_history):
         st.error(f"Error communicating with Groq API: {str(e)}")
         return None
 
-# Load custom CSS
 def load_css():
     return """
                 <style>
@@ -96,10 +105,8 @@ def load_css():
             outline: none;  /* Remove default focus outline */
         }
         </style>
-
     """
 
-# Function to initialize session state with a welcome message
 def initialize_session_state():
     if "conversation_history" not in st.session_state:
         # Add initial greeting from the chatbot
@@ -110,7 +117,6 @@ def initialize_session_state():
     if "user_input" not in st.session_state:
         st.session_state.user_input = ""
 
-# Function to display the chat history
 def display_chat_history():
     chat_history = '<div class="chat-container">'
     for message in st.session_state.conversation_history:
@@ -121,7 +127,6 @@ def display_chat_history():
     chat_history += "</div>"
     st.markdown(chat_history, unsafe_allow_html=True)
 
-# Function to handle user input
 def handle_user_input(client):
     if st.session_state.user_input:
         user_message = st.session_state.user_input
@@ -140,7 +145,42 @@ def handle_user_input(client):
         # Clear the input after submitting
         st.session_state.user_input = ""
 
-# Main function to run the app
+def process_uploaded_file(uploaded_file):
+    file_extension = uploaded_file.type
+    
+    # Handle text file (.txt)
+    if file_extension == "text/plain":
+        return uploaded_file.read().decode("utf-8")
+    
+    # Handle PDF file (.pdf)
+    elif file_extension == "application/pdf":
+        return extract_text_from_pdf(uploaded_file)
+    
+    # Handle DOCX file (.docx)
+    elif file_extension == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return extract_text_from_docx(uploaded_file)
+
+    return "Unsupported file type."
+
+def extract_text_from_image(uploaded_file):
+    image = Image.open(image_path)
+    text = pytesseract.image_to_string(image)
+    return text
+
+def extract_text_from_pdf(uploaded_file):
+    pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.read()))
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text()
+    return text
+
+def extract_text_from_docx(uploaded_file):
+    doc = docx.Document(io.BytesIO(uploaded_file.read()))
+    text = ""
+    for para in doc.paragraphs:
+        text += para.text + "\n"
+    return text
+
 def main():
     st.set_page_config(page_title="AI Chatbot", page_icon="💬")
     
@@ -168,12 +208,29 @@ def main():
     
     # Chat input
     st.text_input(
-    "",  # Empty string removes the default text
-    key="user_input",
-    on_change=handle_user_input,
-    args=(client,),
-    placeholder="Type your message and press Enter..."
-)
+        "",  # Empty string removes the default text
+        key="user_input",
+        on_change=handle_user_input,
+        args=(client,),
+        placeholder="Type your message and press Enter..."
+    )
+    
+    uploaded_file = st.file_uploader("Please upload your legal document (TXT, PDF, or DOCX):", type=["txt", "pdf", "docx"])
+    if uploaded_file:
+        extracted_text = process_uploaded_file(uploaded_file)
+        if st.button("Send to Chatbot"):
+            st.session_state.conversation_history.append(
+                {"role": "user", "content": extracted_text}
+            )
+            
+            with st.spinner("AI is analyzing the document..."):
+                ai_response = fetch_ai_response(client, st.session_state.conversation_history)
+        
+            if ai_response:
+                st.session_state.conversation_history.append(
+                    {"role": "assistant", "content": ai_response}
+                )
+
 
 if __name__ == "__main__":
     main()
